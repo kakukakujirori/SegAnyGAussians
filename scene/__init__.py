@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -90,7 +90,7 @@ class Scene:
                         assert False and "Unknown target!"
 
             print("Loading trained model at iteration {}, {}".format(self.loaded_iter, self.feature_loaded_iter))
-            
+
         self.train_cameras = {}
         self.test_cameras = {}
 
@@ -197,13 +197,13 @@ class Scene:
                 print("Initialize feature gaussians from 3DGS point cloud")
                 self.feature_gaussians.create_from_pcd(fetchPly(
                         os.path.join(
-                            self.model_path, 
+                            self.model_path,
                             "point_cloud",
-                            "iteration_" + str(searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target="scene") if (self.loaded_iter is None or self.loaded_iter == -1) else self.loaded_iter), 
+                            "iteration_" + str(searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target="scene") if (self.loaded_iter is None or self.loaded_iter == -1) else self.loaded_iter),
                             "scene_point_cloud.ply"
-                        ), 
+                        ),
                         only_xyz=True
-                    ), 
+                    ),
                 self.cameras_extent
                 )
             elif target == 'contrastive_feature':

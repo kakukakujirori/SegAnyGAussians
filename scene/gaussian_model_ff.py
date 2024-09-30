@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -26,7 +26,7 @@ class Embedder:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.create_embedding_fn()
-        
+
     def create_embedding_fn(self):
         embed_fns = []
         d = self.kwargs['input_dims']
@@ -34,23 +34,23 @@ class Embedder:
         if self.kwargs['include_input']:
             embed_fns.append(lambda x : x)
             out_dim += d
-            
+
         max_freq = self.kwargs['max_freq_log2']
         N_freqs = self.kwargs['num_freqs']
-        
+
         if self.kwargs['log_sampling']:
             freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
         else:
             freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
-            
+
         for freq in freq_bands:
             for p_fn in self.kwargs['periodic_fns']:
                 embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
                 out_dim += d
-                    
+
         self.embed_fns = embed_fns
         self.out_dim = out_dim
-        
+
     def embed(self, inputs):
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
@@ -58,7 +58,7 @@ class Embedder:
 def get_embedder(multires, i=0):
     if i == -1:
         return nn.Identity(), 3
-    
+
     embed_kwargs = {
                 'include_input' : True,
                 'input_dims' : 3,
@@ -67,7 +67,7 @@ def get_embedder(multires, i=0):
                 'log_sampling' : True,
                 'periodic_fns' : [torch.sin, torch.cos],
     }
-    
+
     embedder_obj = Embedder(**embed_kwargs)
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
@@ -80,7 +80,7 @@ class FeatureGaussianModel:
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        
+
         self.scaling_activation = torch.exp
         self.scaling_inverse_activation = torch.log
 
@@ -101,7 +101,7 @@ class FeatureGaussianModel:
 
         self.feature_smooth_map = None
         self.multi_res_feature_smooth_map = []
-        
+
         self._xyz = torch.empty(0)
         self._mask = torch.empty(0)
         # self._features_dc = torch.empty(0)
@@ -131,13 +131,13 @@ class FeatureGaussianModel:
 
 
     def change_to_segmentation_mode(self, training_args = None, target = 'coarse_seg_everything', fixed_feature = False):
-        
+
         if target == 'coarse_seg_everything':
             self._point_features.data[:,:] = 0
         elif target == 'contrastive_feature':
             self._point_features.data = torch.randn_like(self._point_features.data) * 1e-2
 
-            # output [N,27] pe 
+            # output [N,27] pe
             # emb_func, dim = get_embedder(4)
             # xyz = self.get_xyz
             # xyz = (xyz - xyz.min()) / (xyz.max() - xyz.min()) * 2 - 1.
@@ -164,10 +164,10 @@ class FeatureGaussianModel:
                                                         lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                         lr_delay_mult=training_args.position_lr_delay_mult,
                                                         max_steps=training_args.position_lr_max_steps)
-                
 
-            
-            
+
+
+
     def change_to_multi_res_feature_mode(self, training_args = None):
         assert self.idx_mapper is not None and self.multi_res_features is not None and "Multi res feature mode not initialized!"
 
@@ -197,9 +197,9 @@ class FeatureGaussianModel:
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
-            
+
     def initialize_multi_res_feature(self, path = None):
-        
+
         self.idx_mapper = torch.zeros((self._point_features.shape[0], 3), dtype=torch.long, device="cuda")
         fds = [10, 10, 10]
         self.multi_res_features = nn.ParameterList()
@@ -221,14 +221,14 @@ class FeatureGaussianModel:
             self.multi_res_features.append(
                 nn.Parameter(torch.zeros((len(uni), fds[l]), dtype=torch.float, device="cuda").contiguous().requires_grad_(True))
             )
-            
+
             print(f"Layer {str(l+1)} initialized with {len(uni)} grids.")
 
         if path is not None:
             torch.save(self.idx_mapper, os.path.join(path, 'multi_res_idx_mapper.pt'))
 
     def load_multi_res_idx_mapper(self, path = None):
-        
+
         # check whether is file
         if not os.path.isfile(path):
             path = os.path.join(path, 'multi_res_idx_mapper.pt')
@@ -262,14 +262,14 @@ class FeatureGaussianModel:
             mask = ~mask
             print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
 
-        
+
 
         self.old_xyz.append(self._xyz)
         self.old_point_features.append(self._point_features)
         self.old_opacity.append(self._opacity)
         self.old_scaling.append(self._scaling)
         self.old_rotation.append(self._rotation)
-        
+
         assert self.optimizer is None and "Please set optimizer to None"
 
         self._xyz = self._xyz[mask]
@@ -283,7 +283,7 @@ class FeatureGaussianModel:
         tmp = self._mask[self._mask == self.segment_times]
         tmp[mask] += 1
         self._mask[self._mask == self.segment_times] = tmp
-        
+
     def roll_back(self):
         try:
             self._xyz = self.old_xyz.pop()
@@ -291,7 +291,7 @@ class FeatureGaussianModel:
             self._opacity = self.old_opacity.pop()
             self._scaling = self.old_scaling.pop()
             self._rotation = self.old_rotation.pop()
-            
+
             self._mask[self._mask == self.segment_times+1] -= 1
             self.segment_times -= 1
         except:
@@ -318,7 +318,7 @@ class FeatureGaussianModel:
         except:
             # print("Roll back failed. Please run gaussians.segment() first.")
             pass
-    
+
     @torch.no_grad()
     def smooth_point_features(self, K = 16, smoothed_dim = 24):
         if self.feature_smooth_map is None or self.feature_smooth_map["K"] != K:
@@ -334,7 +334,7 @@ class FeatureGaussianModel:
         cur_features[:, :smoothed_dim] = cur_features[self.feature_smooth_map["m"], :smoothed_dim].mean(dim = 1).detach()
 
         self._point_features.data = cur_features
-    
+
     def get_smoothed_point_features(self, K = 16, dropout = 0.5):
         if K <= 1:
             return self._point_features
@@ -365,7 +365,7 @@ class FeatureGaussianModel:
 
     def get_multi_resolution_smoothed_point_features(self, sample_rates = (0.1, 0.5, 1.5), Ks = (4,4,16), smooth_weights = None):
         assert len(sample_rates) == len(Ks) and (smooth_weights is None or smooth_weights.shape[1] == len(Ks))
-        
+
 
         if len(self.multi_res_feature_smooth_map) != len(sample_rates):
             self.multi_res_feature_smooth_map = []
@@ -398,7 +398,7 @@ class FeatureGaussianModel:
             ret += sw * normed_features[pm][idx, :].mean(dim = 1)
 
         return ret
-    
+
 
     def capture(self):
         return (
@@ -416,20 +416,20 @@ class FeatureGaussianModel:
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
         )
-    
+
     def restore(self, model_args, training_args):
-        (self.feature_dim, 
-        self._xyz, 
-        # self._features_dc, 
+        (self.feature_dim,
+        self._xyz,
+        # self._features_dc,
         # self._features_rest,
         self.get_point_features,
-        self._scaling, 
-        self._rotation, 
+        self._scaling,
+        self._rotation,
         self._opacity,
-        self.max_radii2D, 
-        xyz_gradient_accum, 
+        self.max_radii2D,
+        xyz_gradient_accum,
         denom,
-        opt_dict, 
+        opt_dict,
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
@@ -439,15 +439,15 @@ class FeatureGaussianModel:
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
-    
+
     @property
     def get_rotation(self):
         return self.rotation_activation(self._rotation)
-    
+
     @property
     def get_xyz(self):
         return self._xyz
-    
+
     # @property
     # def get_features(self):
     #     features_dc = self._features_dc
@@ -467,11 +467,11 @@ class FeatureGaussianModel:
             ], dim=1)
 
             return combined_feature
-    
+
     @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
-    
+
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
 
@@ -578,7 +578,7 @@ class FeatureGaussianModel:
             f = self.get_point_features.detach().contiguous().cpu().numpy()
         elif smooth_type == 'traditional':
             f = self.get_smoothed_point_features(K=smooth_K, dropout=-1).detach().contiguous().cpu().numpy()
-        
+
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
@@ -811,7 +811,7 @@ class FeatureGaussianModel:
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
-        
+
         new_xyz = self._xyz[selected_pts_mask]
         # new_features_dc = self._features_dc[selected_pts_mask]
         # new_features_rest = self._features_rest[selected_pts_mask]
