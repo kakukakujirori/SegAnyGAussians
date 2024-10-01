@@ -21,14 +21,6 @@ from tqdm import tqdm
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams, get_combined_args
 
-import numpy as np
-
-
-import torch
-from torch import nn
-import pytorch3d.ops
-
-
 import time
 
 try:
@@ -36,6 +28,7 @@ try:
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
+
 
 from sklearn.preprocessing import QuantileTransformer
 # Borrowed from GARField but modified
@@ -60,6 +53,7 @@ def get_quantile_func(scales: torch.Tensor, distribution="normal"):
         ).to(scales.device)
 
     return quantile_transformer_func
+
 
 def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterations, debug_from):
     print("RFN weight:", opt.rfn)
@@ -92,7 +86,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
     smooth_weights = None
 
-    del gaussians
+    del gaussians  # JUST NEEDED TO INSTANTIATE SCENE!!!
     torch.cuda.empty_cache()
 
     background = torch.ones([dataset.feature_dim], dtype=torch.float32, device="cuda") if dataset.white_background else torch.zeros([dataset.feature_dim], dtype=torch.float32, device="cuda")
@@ -113,6 +107,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
     all_scales = torch.cat(all_scales)
 
     upper_bound_scale = all_scales.max().item()
+    print(f"{all_scales.shape=}, {upper_bound_scale=}")
     # upper_bound_scale = np.percentile(all_scales.detach().cpu().numpy(), 75)
 
     # all_scales = []
@@ -130,6 +125,8 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
         q_trans = get_quantile_func(all_scales, "uniform")
         fixed_scale_gate = torch.tensor([[1 for j in range(32 - scale_aware_dim + i)] + [0 for k in range(scale_aware_dim - i)] for i in range(scale_aware_dim+1)]).cuda()
 
+
+    # training loop start
     for iteration in range(first_iter, opt.iterations + 1):
         iter_start.record()
 
@@ -143,32 +140,30 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
         with torch.no_grad():
-            # N_mask, H, W
-            sam_masks = viewpoint_cam.original_masks.cuda().float()
+            # Get and reorder SAM masks
+            sam_masks = viewpoint_cam.original_masks.cuda().float()  # (N_mask, h, w)
             viewpoint_cam.feature_height, viewpoint_cam.feature_width = viewpoint_cam.image_height, viewpoint_cam.image_width
 
-            # N_mask
-            mask_scales = viewpoint_cam.mask_scales.cuda()
+            mask_scales = viewpoint_cam.mask_scales.cuda()  # (N_mask,)
 
             mask_scales, sort_indices = torch.sort(mask_scales, descending=True)
             sam_masks = sam_masks[sort_indices, :, :]
 
+            # Randomly choose sample scales from existing mask scales (the first and the last ones are later picked very large or very small)
             num_sampled_scales = 8
 
             sampled_scale_index = torch.randperm(len(mask_scales))[:num_sampled_scales]
 
             tmp = torch.zeros(num_sampled_scales+2)
-
             tmp[1:len(sampled_scale_index)+1] = sampled_scale_index
-            tmp[-1] = len(mask_scales) - 1
-            tmp[0] = -1 # attach a bigger scale
+            tmp[-1] = len(mask_scales) - 1  # DUMMY: attach a smaller scale
+            tmp[0] = -1  # DUMMY: attach a bigger scale
             sampled_scale_index = tmp.long()
 
-
             sampled_scales = mask_scales[sampled_scale_index]
-
             second_big_scale = mask_scales[mask_scales < upper_bound_scale].max()
 
+            # Randomly pick sampling pixel position (only where at least one mask exists)
             ray_sample_rate = opt.ray_sample_rate if opt.ray_sample_rate > 0 else opt.num_sampled_rays / (sam_masks.shape[-1] * sam_masks.shape[-2])
 
             sampled_ray = torch.rand(sam_masks.shape[-2], sam_masks.shape[-1]).cuda() < ray_sample_rate
@@ -176,37 +171,41 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
             sampled_ray = torch.logical_and(sampled_ray, ~non_mask_region)
 
-            # H W
-            per_pixel_mask_size = sam_masks * sam_masks.sum(-1).sum(-1)[:,None,None]
+            # Calculate the average size of masks that overlap with each sampled pixel
+            per_pixel_mask_size = sam_masks * sam_masks.sum(-1).sum(-1)[:,None,None]  # (N_mask, h, w)
+            per_pixel_mean_mask_size = per_pixel_mask_size.sum(dim = 0) / (sam_masks.sum(dim = 0) + 1e-9)  # (h, w)
+            per_pixel_mean_mask_size = per_pixel_mean_mask_size[sampled_ray]  # (N_rays,)
 
-            per_pixel_mean_mask_size = per_pixel_mask_size.sum(dim = 0) / (sam_masks.sum(dim = 0) + 1e-9)
-
-            per_pixel_mean_mask_size = per_pixel_mean_mask_size[sampled_ray]
-
-
-            pixel_to_pixel_mask_size = per_pixel_mean_mask_size.unsqueeze(0) * per_pixel_mean_mask_size.unsqueeze(1)
+            # Calculate the loss weight to curb the impact of large masks (ref. A.1 Re-weighting)
+            pixel_to_pixel_mask_size = per_pixel_mean_mask_size.unsqueeze(0) * per_pixel_mean_mask_size.unsqueeze(1)  # (N_rays, N_rays)
             ptp_max_size = pixel_to_pixel_mask_size.max()
-            pixel_to_pixel_mask_size[pixel_to_pixel_mask_size == 0] = 1e10
-            per_pixel_weight = torch.clamp(ptp_max_size / pixel_to_pixel_mask_size, 1.0, None)
-            per_pixel_weight = (per_pixel_weight - per_pixel_weight.min()) / (per_pixel_weight.max() - per_pixel_weight.min()) * 9. + 1.
+            assert torch.all(pixel_to_pixel_mask_size > 0)   # NEVER HAPPENS SINCE sampled_ray IS CHOSEN TO PASS AT LEAST ONE MASK!!!
+            per_pixel_weight = torch.clamp(ptp_max_size / pixel_to_pixel_mask_size, 1.0, None)  # Although 1/pixel_to_pixel_mask_size is enough, multiply ptp_max_size to avoid numerical errors
+            per_pixel_weight = (per_pixel_weight - per_pixel_weight.min()) / (per_pixel_weight.max() - per_pixel_weight.min()) * 9. + 1.  # Since it's normalized to [1, 10], the above multiplication effect disappears
 
-            sam_masks_sampled_ray = sam_masks[:, sampled_ray]
+            sam_masks_sampled_ray = sam_masks[:, sampled_ray]  # (N_mask, N_rays)
 
+
+            # Modulate sampled_scales so they are not exactly the same as existing mask scales
             gt_corrs = []
 
-            sampled_scales[0] = upper_bound_scale + upper_bound_scale * torch.rand(1)[0]
+            sampled_scales[0] = upper_bound_scale + upper_bound_scale * torch.rand(1)[0]  # incredibly large scale as a sentinel
             for idx, si in enumerate(sampled_scale_index):
                 upper_bound = sampled_scales[idx] >= upper_bound_scale
 
                 if si != len(mask_scales) - 1 and not upper_bound:
+                    # (0 < idx <= num_sampled_scales) pick a scale that is between mask_scale[si] and mask_scale[si+1]
                     sampled_scales[idx] -= (sampled_scales[idx] - mask_scales[si+1]) * torch.rand(1)[0]
                 elif upper_bound:
+                    # (0 == idx) pick a scale that is larger than second_big_scale
                     sampled_scales[idx] -= (sampled_scales[idx] - second_big_scale) * torch.rand(1)[0]
                 else:
+                    # (idx == num_sampled_scales+1) pick a scale that is smaller than any existing masks
                     sampled_scales[idx] -= sampled_scales[idx] * torch.rand(1)[0]
 
+                # Calculate V(s,p) for s in sampled_scales (ref. Section 3.2, eq.6)
                 if not upper_bound:
-                    gt_vec = torch.zeros_like(sam_masks_sampled_ray)
+                    gt_vec = torch.zeros_like(sam_masks_sampled_ray)  # (N_mask, N_rays)
                     gt_vec[:si+1,:] = sam_masks_sampled_ray[:si+1,:]
                     for j in range(si, -1, -1):
                         gt_vec[j,:] = torch.logical_and(
@@ -214,54 +213,56 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
                         )
                     gt_vec[si+1:,:] = sam_masks_sampled_ray[si+1:,:]
                 else:
-                    gt_vec = sam_masks_sampled_ray
+                    gt_vec = sam_masks_sampled_ray  # (N_mask, N_rays)
 
-                gt_corr = torch.einsum('nh,nj->hj', gt_vec, gt_vec)
+                # Calculate Corr_m(s, p1, p2)
+                gt_corr = torch.einsum('nh,nj->hj', gt_vec, gt_vec)  # (N_mask, N_rays) & (N_mask, N_rays) -> (N_rays, N_rays)
                 gt_corr[gt_corr != 0] = 1
                 gt_corrs.append(gt_corr)
 
-            # N_scale S C_clip
-            # gt_clip_features = torch.stack(gt_clip_features, dim = 0)
-            # N_scale S S
-            gt_corrs = torch.stack(gt_corrs, dim = 0)
+            gt_corrs = torch.stack(gt_corrs, dim = 0)  # (N_scales=10, N_rays, N_rays)
 
-            sampled_scales = q_trans(sampled_scales).squeeze()
-            sampled_scales = sampled_scales.squeeze()
+            # preprocess transform to uniform distribution (to stabilize the training of scale_gate; sampled_scales are no longer used except for this)
+            sampled_scales = q_trans(sampled_scales).squeeze()  # (N_scales=10,)
 
+
+        # Render a feature map and resize (3D features are already normalized during rendering???)
         render_pkg_feat = render_contrastive_feature(viewpoint_cam, feature_gaussians, pipe, background, norm_point_features=True, smooth_type = 'traditional', smooth_weights=torch.softmax(smooth_weights, dim = -1) if smooth_weights is not None else None, smooth_K = opt.smooth_K)
-        rendered_features = render_pkg_feat["render"]
+        rendered_features = render_pkg_feat["render"]  # (C=32, H, W)
 
+        # feature norm regularization
         rendered_feature_norm = rendered_features.norm(dim = 0, p=2).mean()
         rendered_feature_norm_reg = (1-rendered_feature_norm)**2
 
         rendered_features = torch.nn.functional.interpolate(rendered_features.unsqueeze(0), viewpoint_cam.original_masks.shape[-2:], mode='bilinear').squeeze(0)
 
-        # N_sampled_scales 32
+        # scale gate (NOTE: sampled_scales are rescaled by q_trans)
         if scale_aware_dim <= 0 or scale_aware_dim >= 32:
-            gates = scale_gate(sampled_scales.unsqueeze(-1))
+            gates = scale_gate(sampled_scales.unsqueeze(-1))  # (N_scales=10, 1) -> (N_scales=10, C=32)
         else:
             int_sampled_scales = ((1 - sampled_scales.squeeze()) * scale_aware_dim).long()
             gates = fixed_scale_gate[int_sampled_scales].detach()
 
-        # N_sampled_scales C H W
-        feature_with_scale = rendered_features.unsqueeze(0).repeat([sampled_scales.shape[0],1,1,1])
+        # Apply scale gate, pick sampled position, and get cosine similarity
+        feature_with_scale = rendered_features.unsqueeze(0).repeat([sampled_scales.shape[0],1,1,1])  # (N_scales=10, C=32, h, w)
         feature_with_scale = feature_with_scale * gates.unsqueeze(-1).unsqueeze(-1)
 
-        sampled_feature_with_scale = feature_with_scale[:,:,sampled_ray]
+        sampled_feature_with_scale = feature_with_scale[:,:,sampled_ray]  # (N_scales=10, C=32, N_rays)
 
-        scale_conditioned_features_sam = sampled_feature_with_scale.permute([0,2,1])
+        scale_conditioned_features_sam = sampled_feature_with_scale.permute([0,2,1])  # (N_scales=10, C=32, N_rays) -> (N_scales=10, N_rays, C=32)
 
         scale_conditioned_features_sam = torch.nn.functional.normalize(scale_conditioned_features_sam, dim=-1, p=2)
-        corr = torch.einsum('nhc,njc->nhj', scale_conditioned_features_sam, scale_conditioned_features_sam)
+        corr = torch.einsum('nhc,njc->nhj', scale_conditioned_features_sam, scale_conditioned_features_sam)  # (N_scales=10, N_rays, N_rays)
 
+        # (ref. Appendix A.1 Resampling)
         diag_mask = torch.eye(corr.shape[1], dtype=bool, device=corr.device)
 
-        sum_0 = gt_corrs.sum(dim = 0)
+        sum_0 = gt_corrs.sum(dim = 0)  # (N_scales=10, N_rays, N_rays) -> (N_rays, N_rays)
         consistent_negative = sum_0 == 0
         consistent_positive = sum_0 == len(gt_corrs)
-        inconsistent = torch.logical_not(torch.logical_or(consistent_negative, consistent_positive))
+        inconsistent = torch.logical_not(torch.logical_or(consistent_negative, consistent_positive))  # not "perfectly" consistent pairs: (N_rays, N_rays)
         inconsistent_num = inconsistent.count_nonzero()
-        sampled_num = inconsistent_num / 2
+        sampled_num = inconsistent_num / 2  # number of samples to draw from consistent_positive and consistent_negative respectively
 
         rand_num = torch.rand_like(sum_0)
 

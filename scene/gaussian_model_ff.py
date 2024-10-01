@@ -134,7 +134,7 @@ class FeatureGaussianModel:
 
         if target == 'coarse_seg_everything':
             self._point_features.data[:,:] = 0
-        elif target == 'contrastive_feature':
+        elif target == 'contrastive_feature':  # CHOSEN!!!
             self._point_features.data = torch.randn_like(self._point_features.data) * 1e-2
 
             # output [N,27] pe

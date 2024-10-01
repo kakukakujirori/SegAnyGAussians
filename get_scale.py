@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from PIL import Image
 from argparse import ArgumentParser, Namespace
+from tqdm import tqdm
 import cv2
 
 from arguments import ModelParams, PipelineParams
@@ -16,11 +17,6 @@ importlib.reload(gaussian_renderer)
 
 import os
 FEATURE_DIM = 32
-
-DATA_ROOT = './data/nerf_llff_data_for_3dgs/'
-# MODEL_PATH = './output/figurines_lerf_poses/'
-# MODEL_PATH = './output/figurines/'
-
 ALLOW_PRINCIPLE_POINT_SHIFT = False
 
 
@@ -28,9 +24,8 @@ def get_combined_args(parser : ArgumentParser):
     # cmdlne_string = ['--model_path', model_path]
     cfgfile_string = "Namespace()"
     args_cmdline = parser.parse_args()
-    
-    target_cfg_file = "cfg_args"
 
+    target_cfg_file = "cfg_args"
     try:
         cfgfilepath = os.path.join(args_cmdline.model_path, target_cfg_file)
         print("Looking for config file in", cfgfilepath)
@@ -62,7 +57,7 @@ def generate_grid_index(depth):
 
 
 if __name__ == '__main__':
-    
+
     parser = ArgumentParser(description="Get scales for SAM masks")
 
     model = ModelParams(parser, sentinel=True)
@@ -95,7 +90,7 @@ if __name__ == '__main__':
     assert os.path.exists(os.path.join(dataset.source_path, 'images')) and "Please specify a valid image root."
     assert os.path.join(dataset.source_path, 'sam_masks') and "Please run extract_segment_everything_masks first."
 
-    from tqdm import tqdm
+    print("Loading SAM masks...")
     images_masks = {}
     for i, image_path in tqdm(enumerate(sorted(os.listdir(os.path.join(dataset.source_path, 'images'))))):
         # print(image_path)
@@ -121,7 +116,7 @@ if __name__ == '__main__':
         depth = rendered_pkg['depth']
 
         # plt.imshow(depth.detach().cpu().squeeze().numpy())
-        corresponding_masks = images_masks[view.image_name]
+        corresponding_masks = images_masks[view.image_name]  # (num_masks, h, w)
 
         # generate_grid_index(depth.squeeze())[50, 1]
 
@@ -153,7 +148,7 @@ if __name__ == '__main__':
 
         scale = torch.zeros(len(corresponding_masks))
         for mask_id in range(len(corresponding_masks)):
-            
+
             point_in_3D_in_mask = points_in_3D[eroded_masks[mask_id] == 1]
 
             scale[mask_id] = (point_in_3D_in_mask.std(dim=0) * 2).norm()
