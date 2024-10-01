@@ -28,7 +28,7 @@ def get_combined_args(parser : ArgumentParser):
     # cmdlne_string = ['--model_path', model_path]
     cfgfile_string = "Namespace()"
     args_cmdline = parser.parse_args()
-    
+
     target_cfg_file = "cfg_args"
 
     try:
@@ -62,7 +62,7 @@ def generate_grid_index(depth):
 
 
 if __name__ == '__main__':
-    
+
     parser = ArgumentParser(description="Get scales for SAM masks")
 
     model = ModelParams(parser, sentinel=True)
@@ -150,11 +150,13 @@ if __name__ == '__main__':
             padding=1,
         )
         eroded_masks = (eroded_masks >= 5).squeeze()  # (num_masks, H, W)
+        if len(eroded_masks.shape) == 2:
+            eroded_masks = eroded_masks.unsqueeze(0)
 
         scale = torch.zeros(len(corresponding_masks))
         for mask_id in range(len(corresponding_masks)):
-            
-            point_in_3D_in_mask = points_in_3D[eroded_masks[mask_id] == 1]
+            eroded_mask_positive = (eroded_masks[mask_id] == 1)
+            point_in_3D_in_mask = points_in_3D[eroded_mask_positive]
 
             scale[mask_id] = (point_in_3D_in_mask.std(dim=0) * 2).norm()
 

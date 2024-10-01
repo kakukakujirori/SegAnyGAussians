@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -17,11 +17,11 @@ from utils.sh_utils import eval_sh
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, filtered_mask = None):
     """
-    Render the scene. 
-    
+    Render the scene.
+
     Background tensor (bg_color) must be on GPU!
     """
- 
+
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -85,7 +85,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
 
-    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
     rendered_image, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,
@@ -104,11 +104,15 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "radii": radii}
 
 
+################################################################
+# Below are the newly added functions
+################################################################
+
 
 def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, precomputed_mask = None):
     """
-    Render the scene. 
-    
+    Render the scene.
+
     Background tensor (bg_color) must be on GPU!
     """
     # start_time  = time.time()
@@ -148,12 +152,13 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     means2D = screenspace_points
     opacity = pc.get_opacity
 
+    # get a mask
     mask = pc.get_mask if precomputed_mask is None else precomputed_mask
     if len(mask.shape) == 1 or mask.shape[-1] == 1:
         mask = mask.squeeze().unsqueeze(-1).repeat([1,3]).cuda()
 
     shs = None
-    colors_precomp = mask
+    colors_precomp = mask  # override colors_precomp with mask
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -169,7 +174,7 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     # print("Render time checker: prepare vars", time.time() - start_time)
 
 
-    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
     rendered_mask, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,
@@ -179,7 +184,7 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
-    
+
     # print("Render time checker: main render", time.time() - start_time)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
@@ -193,8 +198,8 @@ from diff_gaussian_rasterization_depth import GaussianRasterizationSettings as G
 
 def render_with_depth(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, override_mask = None, filtered_mask = None):
     """
-    Render the scene. 
-    
+    Render the scene.
+
     Background tensor (bg_color) must be on GPU!
     """
     # start_time  = time.time()
@@ -270,7 +275,7 @@ def render_with_depth(viewpoint_camera, pc : GaussianModel, pipe, bg_color : tor
     # print("Render time checker: prepare vars", time.time() - start_time)
 
 
-    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
     rendered_image, rendered_mask, rendered_depth, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,
@@ -281,7 +286,7 @@ def render_with_depth(viewpoint_camera, pc : GaussianModel, pipe, bg_color : tor
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
-    
+
     # print("Render time checker: main render", time.time() - start_time)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
@@ -299,11 +304,11 @@ from scene.gaussian_model_ff import FeatureGaussianModel
 
 def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, norm_point_features = False, smooth_type = None, smooth_weights = None, smooth_K = 16):
     """
-    Render the scene. 
-    
+    Render the scene.
+
     Background tensor (bg_color) must be on GPU!
     """
- 
+
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -358,12 +363,12 @@ def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe
         colors_precomp = pc.get_multi_resolution_smoothed_point_features(smooth_weights = smooth_weights)
     elif smooth_type == 'traditional':
         colors_precomp = pc.get_smoothed_point_features(K = smooth_K, dropout=0.5)
-    
+
     if norm_point_features:
         colors_precomp = colors_precomp / (colors_precomp.norm(dim=1, keepdim=True) + 1e-9)
     # colors_precomp = torch.nn.functional.normalize(colors_precomp, dim=1)
 
-    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
     rendered_image, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,

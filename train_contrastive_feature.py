@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -99,7 +99,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
-    
+
     first_iter = 0
     viewpoint_stack = None
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -136,12 +136,12 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
         # Pick a random Camera
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
-        
+
         if iteration < -1:
             viewpoint_cam = viewpoint_stack[0]
         else:
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-        
+
         with torch.no_grad():
             # N_mask, H, W
             sam_masks = viewpoint_cam.original_masks.cuda().float()
@@ -149,6 +149,8 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
             # N_mask
             mask_scales = viewpoint_cam.mask_scales.cuda()
+            if len(mask_scales) == 0:
+                continue
 
             mask_scales, sort_indices = torch.sort(mask_scales, descending=True)
             sam_masks = sam_masks[sort_indices, :, :]
@@ -163,7 +165,6 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
             tmp[-1] = len(mask_scales) - 1
             tmp[0] = -1 # attach a bigger scale
             sampled_scale_index = tmp.long()
-            
 
             sampled_scales = mask_scales[sampled_scale_index]
 
@@ -189,7 +190,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
             pixel_to_pixel_mask_size[pixel_to_pixel_mask_size == 0] = 1e10
             per_pixel_weight = torch.clamp(ptp_max_size / pixel_to_pixel_mask_size, 1.0, None)
             per_pixel_weight = (per_pixel_weight - per_pixel_weight.min()) / (per_pixel_weight.max() - per_pixel_weight.min()) * 9. + 1.
-            
+
             sam_masks_sampled_ray = sam_masks[:, sampled_ray]
 
             gt_corrs = []
@@ -272,7 +273,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
         sampled_mask_positive = torch.logical_or(
             torch.logical_or(
                 sampled_positive, torch.any(torch.logical_and(corr < 0.75, gt_corrs == 1), dim = 0)
-            ), 
+            ),
             inconsistent
         )
         sampled_mask_positive = torch.logical_and(sampled_mask_positive, ~diag_mask)
@@ -282,7 +283,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
         sampled_mask_negative = torch.logical_or(
             torch.logical_or(
                 sampled_negative, torch.any(torch.logical_and(corr > 0.5, gt_corrs == 0), dim = 0)
-            ), 
+            ),
             inconsistent
         )
         sampled_mask_negative = torch.logical_and(sampled_mask_negative, ~diag_mask)
@@ -314,18 +315,18 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
             })
             progress_bar.update(10)
 
-    
+
     scene.save_feature(iteration, target = 'contrastive_feature', smooth_weights = torch.softmax(smooth_weights, dim = -1) if smooth_weights is not None else None, smooth_type = 'traditional', smooth_K = opt.smooth_K)
     torch.save(scale_gate.state_dict(), os.path.join(scene.model_path, "point_cloud/iteration_{}/".format(iteration) + "scale_gate.pt"))
 
-def prepare_output_and_logger(args):    
+def prepare_output_and_logger(args):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
         else:
             unique_str = str(uuid.uuid4())
         args.model_path = os.path.join("./output/", unique_str[0:10])
-        
+
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
     os.makedirs(args.model_path, exist_ok = True)
@@ -345,7 +346,7 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=np.random.randint(10000, 20000))
+    parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
@@ -355,11 +356,11 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument('--target', default='contrastive_feature', const='contrastive_feature', nargs='?', choices=['scene', 'seg', 'feature', 'coarse_seg_everything', 'contrastive_feature'])
     parser.add_argument("--iteration", default=-1, type=int)
-    
+
     # args = parser.parse_args(sys.argv[1:])
     args = get_combined_args(parser, target_cfg_file = 'cfg_args')
     args.save_iterations.append(args.iterations)
-    
+
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
