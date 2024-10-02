@@ -227,7 +227,16 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
 
         # Render a feature map and resize (3D features are already normalized during rendering???)
-        render_pkg_feat = render_contrastive_feature(viewpoint_cam, feature_gaussians, pipe, background, norm_point_features=True, smooth_type = 'traditional', smooth_weights=torch.softmax(smooth_weights, dim = -1) if smooth_weights is not None else None, smooth_K = opt.smooth_K)
+        render_pkg_feat = render_contrastive_feature(
+            viewpoint_cam,
+            feature_gaussians,
+            pipe,
+            background,
+            norm_point_features=True,
+            smooth_type = 'traditional',
+            smooth_weights=torch.softmax(smooth_weights, dim = -1) if smooth_weights is not None else None,
+            smooth_K = opt.smooth_K,
+        )
         rendered_features = render_pkg_feat["render"]  # (C=32, H, W)
 
         # feature norm regularization

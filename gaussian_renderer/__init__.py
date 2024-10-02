@@ -285,90 +285,88 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
 #             "visibility_filter" : radii > 0,
 #             "radii": radii}
 
-from diff_gaussian_rasterization_contrastive_f import GaussianRasterizationSettings as GaussianRasterizationSettingsContrastiveF
-from diff_gaussian_rasterization_contrastive_f import GaussianRasterizer as GaussianRasterizerContrastiveF
+# from diff_gaussian_rasterization_contrastive_f import GaussianRasterizationSettings as GaussianRasterizationSettingsContrastiveF
+# from diff_gaussian_rasterization_contrastive_f import GaussianRasterizer as GaussianRasterizerContrastiveF
 from scene.gaussian_model_ff import FeatureGaussianModel
 
-def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, norm_point_features = False, smooth_type = None, smooth_weights = None, smooth_K = 16):
+def render_contrastive_feature(
+        viewpoint_camera,
+        pc : FeatureGaussianModel,
+        pipe,
+        bg_color: torch.Tensor,
+        scaling_modifier = 1.0,
+        norm_point_features = False,
+        smooth_type = None,
+        smooth_weights = None,
+        smooth_K = 16,
+    ):
     """
     Render the scene.
 
     Background tensor (bg_color) must be on GPU!
     """
 
-    # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
-    try:
-        screenspace_points.retain_grad()
-    except:
-        pass
-
-    # Set up rasterization configuration
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
-    raster_settings = GaussianRasterizationSettingsContrastiveF(
-        image_height=int(viewpoint_camera.feature_height),
-        image_width=int(viewpoint_camera.feature_width),
-        tanfovx=tanfovx,
-        tanfovy=tanfovy,
-        bg=bg_color,
-        scale_modifier=scaling_modifier,
-        viewmatrix=viewpoint_camera.world_view_transform,
-        projmatrix=viewpoint_camera.full_proj_transform,
-        sh_degree=pc.active_sh_degree,
-        campos=viewpoint_camera.camera_center,
-        prefiltered=False,
-        debug=pipe.debug
+    focal_length_x = viewpoint_camera.image_width / (2 * tanfovx)
+    focal_length_y = viewpoint_camera.image_height / (2 * tanfovy)
+    K = torch.tensor(
+        [
+            [focal_length_x, 0, viewpoint_camera.image_width / 2.0],
+            [0, focal_length_y, viewpoint_camera.image_height / 2.0],
+            [0, 0, 1],
+        ],
+        device="cuda",
     )
 
-    rasterizer = GaussianRasterizerContrastiveF(raster_settings=raster_settings)
-
     means3D = pc.get_xyz
-    means2D = screenspace_points
     opacity = pc.get_opacity
 
-    # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
-    # scaling / rotation by the rasterizer.
-    scales = None
-    rotations = None
-    cov3D_precomp = None
-    if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_covariance(scaling_modifier)
-    else:
-        scales = pc.get_scaling
-        rotations = pc.get_rotation
+    scales = pc.get_scaling * scaling_modifier
+    rotations = pc.get_rotation
 
-    # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
-    # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
-    shs = None
-    colors_precomp = None
+    sh_degree = None
+    colors = None
 
     if smooth_type is None:
-        colors_precomp = pc.get_point_features
+        colors = pc.get_point_features
     elif smooth_type == 'multi_res':
-        colors_precomp = pc.get_multi_resolution_smoothed_point_features(smooth_weights = smooth_weights)
+        colors = pc.get_multi_resolution_smoothed_point_features(smooth_weights = smooth_weights)
     elif smooth_type == 'traditional':
-        colors_precomp = pc.get_smoothed_point_features(K = smooth_K, dropout=0.5)
+        colors = pc.get_smoothed_point_features(K = smooth_K, dropout=0.5)
 
     if norm_point_features:
-        colors_precomp = colors_precomp / (colors_precomp.norm(dim=1, keepdim=True) + 1e-9)
+        colors = colors / (colors.norm(dim=1, keepdim=True) + 1e-9)
     # colors_precomp = torch.nn.functional.normalize(colors_precomp, dim=1)
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    rendered_image, radii = rasterizer(
-        means3D = means3D,
-        means2D = means2D,
-        shs = shs,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
-        scales = scales,
-        rotations = rotations,
-        cov3D_precomp = cov3D_precomp)
+    viewmat = viewpoint_camera.world_view_transform.transpose(0, 1) # [4, 4]
+    render_colors, render_alphas, info = rasterization(
+        means=means3D,  # [N, 3]
+        quats=rotations,  # [N, 4]
+        scales=scales,  # [N, 3]
+        opacities=opacity.squeeze(-1),  # [N,]
+        colors=colors,  # [N, D=32]
+        viewmats=viewmat[None],  # [1, 4, 4]
+        Ks=K[None],  # [1, 3, 3]
+        backgrounds=bg_color[None],
+        width=int(viewpoint_camera.image_width),
+        height=int(viewpoint_camera.image_height),
+        packed=False,
+        sh_degree=sh_degree,
+    )
+    # [1, H, W, 3] -> [3, H, W]
+    rendered_image = render_colors[0].permute(2, 0, 1)
+    radii = info["radii"].squeeze(0) # [N,]
+    try:
+        info["means2d"].retain_grad() # [1, N, 2]
+    except:
+        pass
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     return {"render": rendered_image,
-            "viewspace_points": screenspace_points,
+            "viewspace_points": info["means2d"],
             "visibility_filter" : radii > 0,
             "radii": radii}
