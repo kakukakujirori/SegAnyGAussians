@@ -111,9 +111,15 @@ if __name__ == '__main__':
 
     for it, view in tqdm(enumerate(cameras)):
 
-        rendered_pkg = gaussian_renderer.render_with_depth(view, scene_gaussians, pipeline.extract(args), background)
+        rendered_pkg = gaussian_renderer.render(
+            view,
+            scene_gaussians,
+            pipeline.extract(args),
+            background,
+            render_mode="D",  # "ED" should be better, but prioritize the reproducibility
+        )
 
-        depth = rendered_pkg['depth']
+        depth = rendered_pkg['render']
 
         # plt.imshow(depth.detach().cpu().squeeze().numpy())
         corresponding_masks = images_masks[view.image_name]  # (num_masks, h, w)
