@@ -9,9 +9,9 @@ from segment_anything import (SamAutomaticMaskGenerator, SamPredictor,
                               sam_model_registry)
 
 if __name__ == '__main__':
-    
+
     parser = ArgumentParser(description="SAM segment everything masks extracting params")
-    
+
     parser.add_argument("--image_root", default='/datasets/nerf_data/360_v2/garden/', type=str)
     parser.add_argument("--sam_checkpoint_path", default='./third_party/segment-anything/sam_ckpt/sam_vit_h_4b8939.pth', type=str)
     parser.add_argument("--sam_arch", default="vit_h", type=str)
@@ -19,12 +19,12 @@ if __name__ == '__main__':
     parser.add_argument("--downsample_type", default='image', type=str, choices=['image', 'mask'], help="Downsample then segment, or segment then downsample.")
 
     args = parser.parse_args()
-    
+
     print("Initializing SAM...")
     model_type = args.sam_arch
     sam = sam_model_registry[model_type](checkpoint=args.sam_checkpoint_path).to('cuda')
     predictor = SamPredictor(sam)
-    
+
     # custom
     mask_generator = SamAutomaticMaskGenerator(
         model=sam,
@@ -50,9 +50,9 @@ if __name__ == '__main__':
     assert os.path.exists(IMAGE_DIR) and "Please specify a valid image root"
     OUTPUT_DIR = os.path.join(args.image_root, 'sam_masks')
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
+
     print("Extracting SAM segment everything masks...")
-    
+
     for path in tqdm(sorted(os.listdir(IMAGE_DIR))):
         name = path.split('.')[0]
         img = cv2.imread(os.path.join(IMAGE_DIR, path))
