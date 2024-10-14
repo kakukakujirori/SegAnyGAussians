@@ -75,7 +75,7 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
     # 30030
     scale_gate = torch.nn.Sequential(
-        torch.nn.Linear(1, 32, bias=True),
+        torch.nn.Linear(1, dataset.feature_dim, bias=True),
         torch.nn.Sigmoid()
     )
     scale_gate = scale_gate.cuda()
