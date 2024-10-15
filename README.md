@@ -1,12 +1,16 @@
 # SAGA
 
-The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.org/abs/2312.00860). 
+The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.org/abs/2312.00860).
 <!-- Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information.  -->
 <br>
 <!-- <br> -->
 <div align=center>
 <img src="./assets/saga-teaser.png" width="700px">
 </div>
+
+# Notes for submission to CE6190
+
+This codebase already includes trained 3DGS+feature scenes. You can run ```notebooks/20241013_evaluation.ipynb``` for the qualitative evaluation reported in the submission PDF.
 
 # Installation
 The installation of SAGA is similar to [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
@@ -106,7 +110,7 @@ After setting up the GUI, you can see the following interface:
 #### Hyper-parameter option:
 - ``scale``: The 3D scale (used for both segmentation and clustering).
 - ``score thresh``: The segmentation similarity threshold (used for segmentation).
-#### Render option: 
+#### Render option:
 
 - ``RGB``: Show the original RGB of current 3D-GS model at the specific viewpoint.
 - ``PCA``: Show the PCA decomposition results of 3D features of current 3D-GS model at the specific viewpoint.
@@ -145,7 +149,7 @@ python render.py -m <path to the pre-trained 3DGS model> --target scene
 If you find this project helpful for your research, please consider citing the report and giving a ⭐.
 ```BibTex
 @article{cen2023saga,
-      title={Segment Any 3D Gaussians}, 
+      title={Segment Any 3D Gaussians},
       author={Jiazhong Cen and Jiemin Fang and Chen Yang and Lingxi Xie and Xiaopeng Zhang and Wei Shen and Qi Tian},
       year={2023},
       journal={arXiv preprint arXiv:2312.00860},

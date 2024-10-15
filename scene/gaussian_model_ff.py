@@ -615,7 +615,7 @@ class FeatureGaussianModel:
 
         f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_")]
         f_names = sorted(f_names, key = lambda x: int(x.split('_')[-1]))
-        assert len(f_names)==self.feature_dim
+        assert len(f_names)==self.feature_dim, f"{f_names=}, {self.feature_dim=}"
 
         features_extra = np.zeros((xyz.shape[0], len(f_names)))
         for idx, attr_name in enumerate(f_names):

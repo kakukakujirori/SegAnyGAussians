@@ -185,7 +185,6 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
             sam_masks_sampled_ray = sam_masks[:, sampled_ray]  # (N_mask, N_rays)
 
-
             # Modulate sampled_scales so they are not exactly the same as existing mask scales
             gt_corrs = []
 
@@ -275,9 +274,13 @@ def training(dataset, opt, pipe, iteration, saving_iterations, checkpoint_iterat
 
         rand_num = torch.rand_like(sum_0)
 
-        sampled_positive = torch.logical_and(consistent_positive, rand_num < sampled_num / consistent_positive.count_nonzero())
-
-        sampled_negative = torch.logical_and(consistent_negative, rand_num < sampled_num / consistent_negative.count_nonzero())
+        class_rebalancing = True
+        if class_rebalancing:
+            sampled_positive = torch.logical_and(consistent_positive, rand_num < sampled_num / consistent_positive.count_nonzero())
+            sampled_negative = torch.logical_and(consistent_negative, rand_num < sampled_num / consistent_negative.count_nonzero())
+        else:
+            sampled_positive = consistent_positive
+            sampled_negative = consistent_negative
 
         sampled_mask_positive = torch.logical_or(
             torch.logical_or(
