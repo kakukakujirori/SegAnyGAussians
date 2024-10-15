@@ -574,7 +574,7 @@ class GaussianSplattingGUI:
     def fetch_data(self, view_camera):
 
         scene_outputs = render(view_camera, self.engine['scene'], self.opt, self.bg_color)
-        feature_outputs = render_contrastive_feature(view_camera, self.engine['feature'], self.opt, self.bg_feature)
+        feature_outputs = render_contrastive_feature(view_camera, self.engine['feature'], self.opt, self.bg_feature, smooth_K=1)  # KNN is already saved in each Gaussian
         if self.cluster_in_3D_flag:
             self.cluster_in_3D_flag = False
             print("Clustering in 3D...")
